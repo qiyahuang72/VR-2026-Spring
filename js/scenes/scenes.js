@@ -24,6 +24,11 @@ export default () => {
          { name: "text7"        , path: "./text7.js"        , public: true },
          { name: "master1"      , path: "./master1.js"      , public: true },
          { name: "bouncing"     , path: "./bouncing.js"     , public: true },
+         { name: "car"         , path: "./car.js" , public: true },
+         { name: "carDrive"     , path: "./carDrive.js" , public: true },
+         { name: "campFire"     , path: "./campFire.js" , public: true },
+         { name: "classUse1"     , path: "./classUse1.js" , public: true },
+         { name: "classUse2"     , path: "./classUse2.js" , public: true },
       ]
    };
 }
