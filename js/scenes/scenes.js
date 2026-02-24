@@ -22,6 +22,8 @@ export default () => {
          { name: "text5"        , path: "./text5.js"        , public: true },
          { name: "text6"        , path: "./text6.js"        , public: true },
          { name: "text7"        , path: "./text7.js"        , public: true },
+         { name: "text8"        , path: "./text8.js"        , public: true },
+         { name: "dissolve"     , path: "./dissolve.js"     , public: true },
          { name: "master1"      , path: "./master1.js"      , public: true },
          { name: "bouncing"     , path: "./bouncing.js"     , public: true },
          { name: "car"         , path: "./car.js" , public: true },
@@ -30,6 +32,7 @@ export default () => {
          { name: "classUse1"     , path: "./classUse1.js" , public: true },
          { name: "textHW"     , path: "./textHW.js" , public: true },
          { name: "master2"      , path: "./master2.js"      , public: true }
+         { name: "classUse2"     , path: "./classUse2.js" , public: true },
       ]
    };
 }
