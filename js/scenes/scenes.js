@@ -35,6 +35,11 @@ export default () => {
          { name: "carDrive"     , path: "./carDrive.js" , public: true },
          { name: "campFire"     , path: "./campFire.js" , public: true },
          { name: "textHW"     , path: "./textHW.js" , public: true },
+         { name: "master2"      , path: "./master2.js"      , public: true },
+         { name: "car"          , path: "./car.js"          , public: true },
+         { name: "carDrive"     , path: "./carDrive.js"     , public: true },
+         { name: "campFire"     , path: "./campFire.js"     , public: true },
+         { name: "textHW"     , path: "./textHW.js"         , public: true },
          { name: "master2"      , path: "./master2.js"      , public: true }
       ]
    };
