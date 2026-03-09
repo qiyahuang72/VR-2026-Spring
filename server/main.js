@@ -38,6 +38,13 @@ trackInfo["4"] = [0,0,0,0,0,0,0];
 var trackMessage = "";
 
 var pendingAIQueries = new Map();
+var openAISharedState = {
+   outgoingMessage: "",
+   incomingMessage: "",
+   lastQueryId: null,
+   lastModel: "gpt-4o",
+   lastError: ""
+};
 
 var app = express();
 var port = process.argv[2] || 8000;
@@ -414,19 +421,27 @@ holojam.on('tick', (a, b) => {
 
 app.route("/api/aiquery").post(function(req, res) {
    const { query, queryId, model } = req.body;
-   
-   if (!query) {
+   const queryText = ((typeof query === "string" ? query : openAISharedState.outgoingMessage) || "").trim();
+
+   if (!queryText) {
       return res.status(400).json({ error: "Query text is required" });
    }
-   
-   console.log(`Received AI query: ${query}`);
+
+   openAISharedState.outgoingMessage = queryText;
+   openAISharedState.lastQueryId = queryId === undefined ? null : queryId;
+   openAISharedState.lastModel = model || "gpt-4o";
+   openAISharedState.lastError = "";
+
+   console.log(`[OpenAI] outgoingMessage: ${openAISharedState.outgoingMessage}`);
    
    const apiKey = process.env.OPENAI_API_KEY;
    if (!apiKey) {
       console.error('OpenAI API key not found in .env file');
+      openAISharedState.lastError = "OpenAI API key not configured";
       return res.status(500).json({ 
          error: "OpenAI API key not configured", 
-         details: "Add OPENAI_API_KEY to your .env file"
+         details: "Add OPENAI_API_KEY to your .env file",
+         state: openAISharedState
       });
    }
    
@@ -437,7 +452,7 @@ app.route("/api/aiquery").post(function(req, res) {
          'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-         model: model || 'gpt-4o',
+         model: openAISharedState.lastModel,
          messages: [
             {
                role: "system",
@@ -445,7 +460,7 @@ app.route("/api/aiquery").post(function(req, res) {
             },
             {
                role: "user",
-               content: query
+               content: queryText
             }
          ]
       })
@@ -457,22 +472,30 @@ app.route("/api/aiquery").post(function(req, res) {
       return response.json();
    })
    .then(data => {
-      const response = data.choices[0].message.content;
+      const response = data.choices[0].message.content || "";
+      openAISharedState.incomingMessage = response;
       
       res.json({ 
          queryId: queryId,
-         response: response
+         response: response,
+         state: openAISharedState
       });
       
-      console.log(`AI response for query ${queryId}: ${response.substring(0, 100)}${response.length > 100 ? '...' : ''}`);
+      console.log(`[OpenAI] incomingMessage: ${response}`);
    })
    .catch(error => {
       console.error('Error calling OpenAI API:', error);
+      openAISharedState.lastError = error.message;
       res.status(500).json({ 
          error: "Error processing AI query", 
-         details: error.message 
+         details: error.message,
+         state: openAISharedState
       });
    });
+});
+
+app.route("/api/aiquery/state").get(function(req, res) {
+   res.json(openAISharedState);
 });
 
 app.route("/api/wit/speech").post(function(req, res) {
