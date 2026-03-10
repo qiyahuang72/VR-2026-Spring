@@ -1,25 +1,43 @@
 import * as cg from "../render/core/cg.js";
 import { ControllerBeam } from "../render/core/controllerInput.js";
 
-// TRACK THE BEAM FROM THE LEFT CONTROLLER, AND USE IT TO INTERSECT WITH A RECTANGLE.
-// SHOW THE LOCATION OF THE BEAM WITHIN THE RECTANGLE, AND BEAM LENGTH TO THE RECTANGLE.
+// INTERSECT CONTROLLER BEAMS WITH A RECTANGLE.
 
 export const init = async model => {
-   let round = t => ((t+'').charAt(0) == '-' ? '' : ' ') + cg.round(t);
    const inch = .0254, cw = .01271;
+   let round = t => ((t+'').charAt(0) == '-' ? '' : ' ') + cg.round(t);
    let rect = model.add('square').move(0,1.5,0).scale(.2,.1,1);
-   let beam = new ControllerBeam(model, 'left');
+   let beamL = new ControllerBeam(model, 'left');
+   let beamR = new ControllerBeam(model, 'right');
 
    model.animate(() => {
-      beam.update();
-      let result = beam.hitRect(rect.getGlobalMatrix());
-      model.remove(1);
-      if (result) {
+      rect.color(.25,.35,.5);
+      while (model.nChildren() > 1)
+         model.remove(1);
+
+      // LEFT CONTROLLER BEAM SHOWS TEXT OF U,V,D AND MAKES A STEADY VIBRATION
+
+      beamL.update();
+      let uvdL = beamL.hitRect(rect.getGlobalMatrix());
+      if (uvdL) {
          rect.color(1,1,1);
-         let text = 'u: ' + round(result[0]) + '\nv: ' + round(result[1]) + '\nd: ' + round(result[2]);
-         model.add(clay.text(text)).move(-.05,1.52,.001).scale(.02/inch).color(0,0,0);
+         let u = uvdL[0], v = uvdL[1], d = uvdL[2];
+         let text = 'u:' + round(u) + '\nv:' + round(v) + '\nd:' + round(d);
+         model.add(clay.text(text)).move(-.036,1.53,.001)
+	                           .scale(.02/inch).color(0,0,0);
+	 vibrate('left', u*u < .033 && v*v < .09 ? 1 : .5);
       }
-      else
-         rect.color(.25,.35,.5);
+
+      // RIGHT CONTROLLER BEAM MOVES A TARGET OBJECT AND MAKES A PULSED VIBRATION
+
+      beamR.update();
+      let uvdR = beamR.hitRect(rect.getGlobalMatrix());
+      if (uvdR) {
+         rect.color(1,.5,.5);
+         let u = uvdL[0], v = uvdL[1];
+         model.add('diskZ').move(.2*u,1.5+.1*v,20.5,.001).scale(.01).color(0,0,0).dull();
+	 if (model.time % .04 < .02)
+	    vibrate('right', 1, 2);
+      }
    });
 }
