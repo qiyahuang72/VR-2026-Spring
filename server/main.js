@@ -420,14 +420,17 @@ holojam.on('tick', (a, b) => {
 */
 
 app.route("/api/aiquery").post(function(req, res) {
-   const { query, queryId, model } = req.body;
+   const { query, queryId, model, messages, tools, tool_choice, parallel_tool_calls, response_format } = req.body;
+   const hasMessages = Array.isArray(messages) && messages.length > 0;
    const queryText = ((typeof query === "string" ? query : openAISharedState.outgoingMessage) || "").trim();
 
-   if (!queryText) {
-      return res.status(400).json({ error: "Query text is required" });
+   if (!hasMessages && !queryText) {
+      return res.status(400).json({ error: "Query text or messages are required" });
    }
 
-   openAISharedState.outgoingMessage = queryText;
+   openAISharedState.outgoingMessage = hasMessages
+      ? ((messages[messages.length - 1] && messages[messages.length - 1].content) || "[messages]")
+      : queryText;
    openAISharedState.lastQueryId = queryId === undefined ? null : queryId;
    openAISharedState.lastModel = model || "gpt-4o";
    openAISharedState.lastError = "";
@@ -445,25 +448,33 @@ app.route("/api/aiquery").post(function(req, res) {
       });
    }
    
+   const requestMessages = hasMessages ? messages : [
+      {
+         role: "system",
+         content: "You are a helpful assistant in a WebXR environment. Provide concise, informative responses."
+      },
+      {
+         role: "user",
+         content: queryText
+      }
+   ];
+
+   const requestBody = {
+      model: openAISharedState.lastModel,
+      messages: requestMessages
+   };
+   if (tools) requestBody.tools = tools;
+   if (tool_choice) requestBody.tool_choice = tool_choice;
+   if (parallel_tool_calls !== undefined) requestBody.parallel_tool_calls = parallel_tool_calls;
+   if (response_format) requestBody.response_format = response_format;
+
    fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
          'Content-Type': 'application/json',
          'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify({
-         model: openAISharedState.lastModel,
-         messages: [
-            {
-               role: "system",
-               content: "You are a helpful assistant in a WebXR environment. Provide concise, informative responses."
-            },
-            {
-               role: "user",
-               content: queryText
-            }
-         ]
-      })
+      body: JSON.stringify(requestBody)
    })
    .then(response => {
       if (!response.ok) {
@@ -472,12 +483,14 @@ app.route("/api/aiquery").post(function(req, res) {
       return response.json();
    })
    .then(data => {
-      const response = data.choices[0].message.content || "";
+      const message = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message : {};
+      const response = message.content || "";
       openAISharedState.incomingMessage = response;
       
       res.json({ 
          queryId: queryId,
          response: response,
+         message: message,
          state: openAISharedState
       });
       
@@ -496,6 +509,34 @@ app.route("/api/aiquery").post(function(req, res) {
 
 app.route("/api/aiquery/state").get(function(req, res) {
    res.json(openAISharedState);
+});
+
+// Save a scene file (restricted to js/scenes/*.js)
+app.route("/api/saveScene").post(function(req, res) {
+   const { path: filePath, contents } = req.body || {};
+
+   if (typeof filePath !== "string" || typeof contents !== "string") {
+      return res.status(400).json({ error: "path and contents are required" });
+   }
+
+   const projectRoot = path.resolve(__dirname, "..");
+   const allowedDir = path.resolve(projectRoot, "js", "scenes");
+   const resolved = path.resolve(projectRoot, filePath);
+
+   if (!resolved.startsWith(allowedDir + path.sep)) {
+      return res.status(400).json({ error: "Invalid path (must be under js/scenes)" });
+   }
+   if (!resolved.endsWith(".js")) {
+      return res.status(400).json({ error: "Invalid file type (must be .js)" });
+   }
+
+   fs.writeFile(resolved, contents, function(err) {
+      if (err) {
+         console.error("Failed to write scene file:", err);
+         return res.status(500).json({ error: "Failed to write file", details: err.message });
+      }
+      res.json({ ok: true, path: filePath });
+   });
 });
 
 app.route("/api/wit/speech").post(function(req, res) {

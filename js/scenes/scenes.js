@@ -34,7 +34,7 @@ export default () => {
          { name: "reading"      , path: "./reading.js"      , public: true },
          { name: "parse2"       , path: "./parse2.js"       , public: true },
 
-         { name: "aiQuery"       , path: "./aiQuery.js"       , public: true },
+         { name: "aiHelper"       , path: "./aiQuery.js"       , public: true },
       ]
    };
 }
