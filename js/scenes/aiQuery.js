@@ -16,19 +16,35 @@ How to try this demo (end-to-end)
       echo 'OPENAI_API_KEY=your_key' >> .env
 3) Open the app in browser and switch to the "aiQuery" scene.
 4) Open browser DevTools console and run one of:
-      await askSceneAI("What is WebXR?");
+      await askGeneralQuestions("What is WebXR?");
+      await askSceneInspector("What's in the scene right now?");
+      await askSceneCoder("Create a rotating red cube");
    or:
-      sceneAIQuestion = "Give me 3 ideas for a VR class demo.";
-      await sendSceneAIQuestion();
+      generalQuestion = "Give me 3 ideas for a VR class demo.";
+      await sendGeneralQuestion();
 5) The answer is rendered back into the WebXR scene text panel.
 
 What this scene exposes globally
-- askSceneAI(question: string): Promise<string>
+- askGeneralQuestions(question: string): Promise<string>
   Sends one question to /api/aiquery and returns the answer string.
-- sceneAIQuestion: string
+  Use this for general Q&A that does not need to inspect or change the scene.
+- askSceneInspector(question: string): Promise<string>
+  Uses tool-calling to inspect and modify the live scene under generatedRoot.
+  Use this for questions like "what's in the scene?" or small edits like "move the cube up".
+- askSceneCoder(prompt: string, filePath?: string): Promise<string>
+  Asks the AI to generate full scene code, validates it, saves it to js/scenes/aiGenerated.js,
+  and hot-loads it into the current scene. Use this when you want to rewrite the scene file.
+- askEverything(...) is intentionally commented out below.
+  It tries to auto-route between tools/code but is still unstable. Do not use it yet.
+- generalQuestion: string
   Shared variable you can set from console.
-- sendSceneAIQuestion(): Promise<string>
-  Convenience wrapper that calls askSceneAI(sceneAIQuestion).
+- sendGeneralQuestion(): Promise<string>
+  Convenience wrapper that calls askGeneralQuestions(generalQuestion).
+
+Notices and limitations:
+- No multi-turn memory: each call is stateless; the AI does not remember prior questions.
+- askSceneCoder writes directly to `js/scenes/aiGenerated.js` (overwrites the file). Depending on the generation results, there are chances that the coder makes syntax errors.
+- Generated results are best-effort and may be incorrect or incomplete.
 */
 
 export const init = async model => {
@@ -59,10 +75,10 @@ export const init = async model => {
       let panelText =
          "AI Query Demo\n" +
          "Type in browser console:\n" +
-         // 'askSceneAIStudio("your question")  // auto-routed by AI\n' +
-         'askSceneAI("any general question")\n' +
-         'askSceneAITools("inspect the scene")\n\n' +
-         'askSceneAICode("describe a scene for the AI to create")\n\n' +
+         // 'askEverything("your question")  // auto-routed by AI\n' +
+         'askGeneralQuestions("any general question")\n' +
+         'askSceneInspector("inspect the scene")\n\n' +
+         'askSceneCoder("describe a scene for the AI to create")\n\n' +
          `Status: ${status}\n\n` +
          `Question:\n${safeQuestion}\n\n` +
          `Answer:\n${safeAnswer}`;
@@ -80,19 +96,19 @@ export const init = async model => {
    let lastQuestion = "";
    let lastAnswer = "";
 
-   // Main console API:
-   // Example: await askSceneAI("Explain spatial computing in one sentence.");
-   window.askSceneAI = async question => {
+   // Main console API (general Q&A only, no scene access):
+   // Example: await askGeneralQuestions("Explain spatial computing in one sentence.");
+   window.askGeneralQuestions = async question => {
       const prompt = (question || "").toString().trim();
       if (!prompt) {
-         console.error('Usage: askSceneAI("your question")');
+         console.error('Usage: askGeneralQuestions("your question")');
          return "";
       }
 
       // Immediately show progress in scene.
       lastQuestion = prompt;
       renderPanel(lastQuestion, "Thinking...", "sending");
-      console.log(`[aiQuery scene] Sending: ${lastQuestion}`);
+      console.log(`[aiQuery scene] Sending (general): ${lastQuestion}`);
 
       try {
          // Send question to server route /api/aiquery (through AIQuery helper).
@@ -101,21 +117,21 @@ export const init = async model => {
 
          // Render successful answer into the scene.
          renderPanel(lastQuestion, lastAnswer, "done");
-         console.log("[aiQuery scene] Received:", lastAnswer);
+         console.log("[aiQuery scene] Received (general):", lastAnswer);
          return lastAnswer;
       } catch (error) {
          // Render error text in scene so failure is visible in XR, not only console.
          lastAnswer = `Error: ${error.message}`;
          renderPanel(lastQuestion, lastAnswer, "error");
-         console.error("[aiQuery scene] Error:", error.message);
+         console.error("[aiQuery scene] General error:", error.message);
          return lastAnswer;
       }
    };
 
    // Alternate console flow:
-   // sceneAIQuestion = "..."; await sendSceneAIQuestion();
-   window.sceneAIQuestion = "";
-   window.sendSceneAIQuestion = () => window.askSceneAI(window.sceneAIQuestion);
+   // generalQuestion = "..."; await sendGeneralQuestion();
+   window.generalQuestion = "";
+   window.sendGeneralQuestion = () => window.askGeneralQuestions(window.generalQuestion);
 
    const clearNode = node => {
       while (node.nChildren()) node.remove(0);
@@ -209,7 +225,7 @@ export const init = async model => {
    const exportSceneToCode = root => {
       const lines = [];
       lines.push("/*");
-      lines.push("   AI-generated scene. This file is overwritten by askSceneAITools/askSceneAICode.");
+      lines.push("   AI-generated scene. This file is overwritten by askSceneInspector/askSceneCoder.");
       lines.push("*/");
       lines.push("");
       lines.push("export const init = async model => {");
@@ -356,10 +372,12 @@ export const init = async model => {
       "For the scene coordinate system, +Y is up, +X is right, and -Z is forward." +
       "Do not import external libraries. Do not reference undefined variables.";
 
-   window.askSceneAICode = async (question, filePath = "js/scenes/aiGenerated.js") => {
+   // Code writer: generates full scene JS and saves it to disk.
+   // Use when you want the result to persist as a file.
+   window.askSceneCoder = async (question, filePath = "js/scenes/aiGenerated.js") => {
       const prompt = (question || "").toString().trim();
       if (!prompt) {
-         console.error('Usage: askSceneAICode("describe the scene")');
+         console.error('Usage: askSceneCoder("describe the scene")');
          return "";
       }
 
@@ -451,10 +469,10 @@ export const init = async model => {
    };
 
 
-   // window.askSceneAIStudio = async question => {
+   // window.askEverything = async question => {
    //    const prompt = (question || "").toString().trim();
    //    if (!prompt) {
-   //       console.error('Usage: askSceneAIStudio("your question")');
+   //       console.error('Usage: askEverything("your question")');
    //       return "";
    //    }
    //    let route;
@@ -464,15 +482,16 @@ export const init = async model => {
    //       route = { mode: "tools", reason: "router_error" };
    //    }
    //    if (route.mode === "code") {
-   //       return window.askSceneAICode(prompt);
+   //       return window.askSceneCoder(prompt);
    //    }
    //    if (route.mode === "chat") {
-   //       return window.askSceneAI(prompt);
+   //       return window.askGeneralQuestions(prompt);
    //    }
-   //    return window.askSceneAITools ? window.askSceneAITools(prompt) : window.askSceneAI(prompt);
+   //    return window.askSceneInspector ? window.askSceneInspector(prompt) : window.askGeneralQuestions(prompt);
    // };
 
    // Tool-calling API for scene inspection and edits.
+   // Use for incremental changes or questions about current objects.
    try {
       const tooling = buildSceneTooling(generatedRoot);
       const savePath = "js/scenes/aiGenerated.js";
@@ -491,10 +510,10 @@ export const init = async model => {
          };
       }
 
-      window.askSceneAITools = async question => {
+      window.askSceneInspector = async question => {
          const prompt = (question || "").toString().trim();
          if (!prompt) {
-            console.error('Usage: askSceneAITools("your question")');
+            console.error('Usage: askSceneInspector("your question")');
             return "";
          }
 
@@ -531,7 +550,7 @@ export const init = async model => {
 
    // Initial panel text so user sees instructions in-world immediately.
    renderPanel("", "", "ready");
-   console.log('[aiQuery scene] Ready. Use askSceneAI("your question") in browser console.');
+   console.log('[aiQuery scene] Ready. Use askGeneralQuestions("your question") in browser console.');
    const loadResult = await loadGeneratedScene();
    if (loadResult && loadResult.error) {
       console.error("[aiQuery scene] Failed to load aiGenerated:", loadResult.error);

@@ -42,7 +42,7 @@ var openAISharedState = {
    outgoingMessage: "",
    incomingMessage: "",
    lastQueryId: null,
-   lastModel: "gpt-4o",
+   lastModel: "gpt-5.1",
    lastError: ""
 };
 
@@ -432,7 +432,7 @@ app.route("/api/aiquery").post(function(req, res) {
       ? ((messages[messages.length - 1] && messages[messages.length - 1].content) || "[messages]")
       : queryText;
    openAISharedState.lastQueryId = queryId === undefined ? null : queryId;
-   openAISharedState.lastModel = model || "gpt-4o";
+   openAISharedState.lastModel = model || "gpt-5.1";
    openAISharedState.lastError = "";
 
    console.log(`[OpenAI] outgoingMessage: ${openAISharedState.outgoingMessage}`);
@@ -448,63 +448,169 @@ app.route("/api/aiquery").post(function(req, res) {
       });
    }
    
-   const requestMessages = hasMessages ? messages : [
-      {
-         role: "system",
-         content: "You are a helpful assistant in a WebXR environment. Provide concise, informative responses."
-      },
-      {
-         role: "user",
-         content: queryText
-      }
-   ];
+   const defaultSystem = "You are a helpful assistant in a WebXR environment. Provide concise, informative responses.";
+   const modelToUse = openAISharedState.lastModel;
+   const useResponses = /-codex\\b/i.test(modelToUse);
 
-   const requestBody = {
-      model: openAISharedState.lastModel,
-      messages: requestMessages
-   };
-   if (tools) requestBody.tools = tools;
-   if (tool_choice) requestBody.tool_choice = tool_choice;
-   if (parallel_tool_calls !== undefined) requestBody.parallel_tool_calls = parallel_tool_calls;
-   if (response_format) requestBody.response_format = response_format;
-
-   fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-         'Content-Type': 'application/json',
-         'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestBody)
-   })
-   .then(response => {
-      if (!response.ok) {
-         throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-      }
-      return response.json();
-   })
-   .then(data => {
-      const message = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message : {};
-      const response = message.content || "";
-      openAISharedState.incomingMessage = response;
-      
-      res.json({ 
+   const sendSuccess = (responseText, message) => {
+      openAISharedState.incomingMessage = responseText;
+      res.json({
          queryId: queryId,
-         response: response,
-         message: message,
+         response: responseText,
+         message: message || { content: responseText },
          state: openAISharedState
       });
-      
-      console.log(`[OpenAI] incomingMessage: ${response}`);
-   })
-   .catch(error => {
+      console.log(`[OpenAI] incomingMessage: ${responseText}`);
+   };
+
+   const sendFailure = error => {
       console.error('Error calling OpenAI API:', error);
       openAISharedState.lastError = error.message;
-      res.status(500).json({ 
-         error: "Error processing AI query", 
+      res.status(500).json({
+         error: "Error processing AI query",
          details: error.message,
          state: openAISharedState
       });
-   });
+   };
+
+   const callChatCompletions = () => {
+      const requestMessages = hasMessages ? messages : [
+         { role: "system", content: defaultSystem },
+         { role: "user", content: queryText }
+      ];
+
+      const requestBody = {
+         model: modelToUse,
+         messages: requestMessages
+      };
+      if (tools) requestBody.tools = tools;
+      if (tool_choice) requestBody.tool_choice = tool_choice;
+      if (parallel_tool_calls !== undefined) requestBody.parallel_tool_calls = parallel_tool_calls;
+      if (response_format) requestBody.response_format = response_format;
+
+      return fetch('https://api.openai.com/v1/chat/completions', {
+         method: 'POST',
+         headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+         },
+         body: JSON.stringify(requestBody)
+      })
+      .then(response => {
+         if (!response.ok) {
+            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+         }
+         return response.json();
+      })
+      .then(data => {
+         const message = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message : {};
+         const responseText = message.content || "";
+         return { responseText, message };
+      });
+   };
+
+   const callResponses = () => {
+      const systemMessages = hasMessages
+         ? messages.filter(m => m && m.role === "system" && typeof m.content === "string")
+         : [];
+      const instructions = systemMessages.length ? systemMessages.map(m => m.content).join("\\n") : defaultSystem;
+
+      const input = [];
+      if (hasMessages) {
+         for (const msg of messages) {
+            if (!msg || !msg.role) continue;
+            if (msg.role === "system") continue;
+            if (msg.role === "tool") {
+               if (msg.tool_call_id) {
+                  input.push({
+                     type: "function_call_output",
+                     call_id: msg.tool_call_id,
+                     output: msg.content || ""
+                  });
+               }
+               continue;
+            }
+            if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length) {
+               if (msg.content) {
+                  input.push({ role: "assistant", content: msg.content });
+               }
+               for (const tc of msg.tool_calls) {
+                  const fn = tc.function || {};
+                  input.push({
+                     type: "function_call",
+                     name: fn.name || tc.name,
+                     arguments: fn.arguments || tc.arguments || "{}",
+                     call_id: tc.id || tc.call_id
+                  });
+               }
+               continue;
+            }
+            if (typeof msg.content === "string") {
+               input.push({ role: msg.role, content: msg.content });
+            }
+         }
+      } else if (queryText) {
+         input.push({ role: "user", content: queryText });
+      }
+
+      const requestBody = {
+         model: modelToUse,
+         instructions: instructions,
+         input: input
+      };
+      if (tools) requestBody.tools = tools;
+      if (tool_choice) requestBody.tool_choice = tool_choice;
+      if (parallel_tool_calls !== undefined) requestBody.parallel_tool_calls = parallel_tool_calls;
+      if (response_format) requestBody.text = { format: response_format };
+
+      return fetch('https://api.openai.com/v1/responses', {
+         method: 'POST',
+         headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+         },
+         body: JSON.stringify(requestBody)
+      })
+      .then(response => {
+         if (!response.ok) {
+            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+         }
+         return response.json();
+      })
+      .then(data => {
+         const output = Array.isArray(data.output) ? data.output : [];
+         let responseText = "";
+         const toolCalls = [];
+
+         for (const item of output) {
+            if (item && item.type === "message" && Array.isArray(item.content)) {
+               for (const part of item.content) {
+                  if (part && part.type === "output_text" && typeof part.text === "string") {
+                     responseText += part.text;
+                  }
+               }
+            } else if (item && item.type === "function_call") {
+               toolCalls.push({
+                  id: item.call_id || item.id,
+                  type: "function",
+                  function: {
+                     name: item.name,
+                     arguments: item.arguments
+                  }
+               });
+            }
+         }
+
+         const message = { content: responseText, tool_calls: toolCalls };
+         return { responseText, message };
+      });
+   };
+
+   const runner = useResponses ? callResponses : callChatCompletions;
+
+   runner()
+      .then(({ responseText, message }) => sendSuccess(responseText, message))
+      .catch(sendFailure);
 });
 
 app.route("/api/aiquery/state").get(function(req, res) {
